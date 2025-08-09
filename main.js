@@ -11,71 +11,115 @@ async function collection(source, target, options = {}) {
     const { config, utils } = options;
     const { tauriFetch: fetch } = utils;
     // 从插件配置中获取墨墨API Token和目标词本ID
-    const { auth_token: authToken, notebook_id: notebookId } = config;
+    // 在墨墨API中，此ID对应的是云词本（notepad）的ID
+    const { auth_token: authToken, notebook_id: notepadId } = config;
+
+    // 墨墨开放平台API基础URL
+    const apiEndpoint = "https://open.maimemo.com/open/api/v1";
 
     // 1. 验证关键配置项是否已设置
     if (!authToken || authToken.length === 0) {
         throw "墨墨开放API Token 未设置。请在Pot插件设置中填写。";
     }
-    if (!notebookId || notebookId.length === 0) {
-        throw "目标词本ID 未设置。请在Pot插件设置中填写。";
+    if (!notepadId || notepadId.length === 0) {
+        throw "目标云词本ID 未设置。请在Pot插件设置中填写。";
     }
 
     // 假设 source 就是用户划选的单词字符串
     const wordToAdd = source;
+    // 墨墨云词本的日期标题格式，例如 "# 2023-10-27"
+    const todayDate = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD 格式
 
-    // 2. 构建符合墨墨API要求的请求体
-    const requestBody = {
-        vocabulary_id: notebookId, // 目标词本的ID
-        word: wordToAdd,           // 要添加的单词
-        source: "PotApp",          // 标识单词来源为Pot应用
-        // 可选：如果Pot未来能提供释义和例句，可以添加到此处
-        // meaning: "单词的释义",
-        // phrases: [{ phrase: "例句内容" }]
-    };
+    // 2. 构建请求头，包含认证信息和内容类型
+    function getHeaders() {
+        return {
+            "Content-Type": "application/json;charset=UTF-8",
+            // 确保Token以 "Bearer " 开头
+            "Authorization": authToken.startsWith("Bearer") ? authToken : `Bearer ${authToken}`,
+        };
+    }
+    const requestHeaders = getHeaders();
 
-    // 3. 构建请求头，包含认证信息和内容类型
-    const requestHeaders = {
-        "Authorization": `Bearer ${authToken}`,
-        "Content-Type": "application/json;charset=UTF-8",
-    };
-
-    // 墨墨开放平台添加单词的API URL
-    const apiUrl = "https://open.maimemo.com/open/api/v1/vocabularies";
-
-    // 4. 使用 tauriFetch 发送 POST 请求
     let res;
+    let currentNotepad;
+
+    // --- 步骤 1: 获取当前云词本的内容 ---
     try {
         res = await fetch(
-            apiUrl,
+            `${apiEndpoint}/notepads/${notepadId}`,
             {
-                method: "POST",
+                method: "GET",
                 headers: requestHeaders,
-                // body 需要符合 tauriFetch 的特定格式，对于 JSON 请求是 { type: "Json", payload: your_object }
+            },
+        );
+    } catch (e) {
+        throw `获取云词本内容失败，请检查网络连接或云词本ID。\n错误详情: ${e.message || e}`;
+    }
+
+    if (res.ok) {
+        const result = res.data;
+        // Bob插件的响应结构是 { success: boolean, data: { notepad: ... } }
+        if (result && result.success && result.data && result.data.notepad) {
+            currentNotepad = result.data.notepad;
+        } else {
+            throw `获取云词本内容失败: ${result.msg || JSON.stringify(result)}`;
+        }
+    } else {
+        throw `HTTP请求错误（获取云词本内容）。\n状态码: ${res.status}\n响应详情: ${JSON.stringify(res.data) || "无响应数据"}`;
+    }
+
+    // --- 步骤 2: 修改云词本内容，添加新单词 ---
+    let { status, content, title, brief, tags } = currentNotepad;
+    const lines = content.split("\n").map((line) => line.trim());
+    let targetLineIndex = lines.findIndex((line) =>
+        line.startsWith(`# ${todayDate}`)
+    );
+
+    // 如果今天日期的标题不存在，则在内容顶部添加
+    if (targetLineIndex === -1) {
+        lines.unshift(""); // 添加空行
+        lines.unshift(`# ${todayDate}`); // 添加日期标题
+        targetLineIndex = 0; // 新的日期标题在数组中的位置
+    }
+    
+    // 在日期标题下添加单词
+    lines.splice(targetLineIndex + 1, 0, wordToAdd);
+
+    // 构建更新后的notepad对象
+    const updatedNotepad = {
+        status,
+        content: lines.join("\n"),
+        title,
+        brief,
+        tags,
+    };
+
+    // --- 步骤 3: 提交更新后的云词本内容 ---
+    try {
+        res = await fetch(
+            `${apiEndpoint}/notepads/${notepadId}`,
+            {
+                method: "POST", // 注意：更新也是POST请求到特定ID
+                headers: requestHeaders,
                 body: {
                     type: "Json",
-                    payload: requestBody,
+                    payload: { notepad: updatedNotepad }, // Bob插件的body结构
                 },
             },
         );
     } catch (e) {
-        // 捕获网络层面的错误，例如断网、DNS解析失败等
-        throw `网络请求失败，请检查网络连接或API地址。\n错误详情: ${e.message || e}`;
+        throw `更新云词本失败，请检查网络连接或API地址。\n错误详情: ${e.message || e}`;
     }
 
-    // 5. 处理API响应
-    if (res.ok) { // HTTP状态码为2xx表示请求成功
-        const result = res.data; // 获取响应数据
-        // 根据墨墨API文档，业务成功时code为0
-        if (result && result.code === 0) {
-            return true; // 单词成功添加到墨墨生词本
+    if (res.ok) {
+        const result = res.data;
+        // Bob插件的响应结构是 { success: boolean, data: ... }
+        if (result && result.success) {
+            return true; // 单词成功添加到墨墨云词本
         } else {
-            // API返回了业务逻辑错误，例如单词已存在、Token无效等
             throw `添加单词失败: ${result.msg || JSON.stringify(result)}`;
         }
     } else {
-        // HTTP请求本身失败 (非2xx状态码)，例如401未授权，404未找到等
-        const errorData = res.data ? JSON.stringify(res.data) : "无响应数据";
-        throw `HTTP请求错误。\n状态码: ${res.status}\n响应详情: ${errorData}`;
+        throw `HTTP请求错误（更新云词本）。\n状态码: ${res.status}\n响应详情: ${JSON.stringify(res.data) || "无响应数据"}`;
     }
 }
