@@ -1,8 +1,11 @@
 {
-  "id": "plugin.com.pot-app.anki",
+  "id": "plugin.com.pot-app.maimemo",
   "plugin_type": "collection",
-  "icon": "anki.svg",
-  "display": "Anki",
-  "homepage": "https://github.com/pot-app/pot-app-collection-plugin-template",
-  "needs": [{ "key": "port", "display": "端口号" }]
+  "icon": "icon.png",
+  "display": "墨墨生词本",
+  "homepage": "https://github.com/your-repo/pot-app-collection-plugin-maimemo",
+  "needs": [
+    { "key": "auth_token", "display": "墨墨开放API Token" },
+    { "key": "notebook_id", "display": "目标词本ID (可在墨墨API文档或墨墨APP内获取)" }
+  ]
 }
