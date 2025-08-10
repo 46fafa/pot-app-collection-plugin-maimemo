@@ -5,7 +5,7 @@
   "display": "墨墨生词本",
   "homepage": "https://github.com/46fafa/pot-app-collection-plugin-maimemo",
   "needs": [
-    { "key": "auth_token", "display": "墨墨开放API Token" },
-    { "key": "notebook_id", "display": "目标词本ID (可在墨墨API文档或墨墨APP内获取)" }
+    { "key": "auth_token", "display": "Token" },
+    { "key": "notebook_id", "display": "目标词本ID" }
   ]
 }
